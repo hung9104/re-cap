@@ -1,0 +1,17 @@
+torch
+torchvision
+transformers==4.40.2
+timm==0.4.9
+decord
+ftfy
+oss2
+opencv-python
+more_itertools
+colorlog
+ruamel.yaml==0.17.28
+git+https://github.com/openai/CLIP.git
+scikit-image
+cog
+sentencepiece
+requests
+datasets
