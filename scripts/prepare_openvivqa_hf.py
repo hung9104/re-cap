@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -187,6 +188,12 @@ def index_images(image_root):
         image_paths[path.name] = path
         image_paths[path.stem] = path
         image_paths[str(path)] = path
+        stem = path.stem
+        if stem.isdigit():
+            image_paths[str(int(stem))] = path
+        for digit_group in re.findall(r"\d+", stem):
+            image_paths.setdefault(digit_group, path)
+            image_paths.setdefault(str(int(digit_group)), path)
     return image_paths
 
 
@@ -203,6 +210,18 @@ def resolve_image_path(record, image_id_map, image_paths):
         f"{image_ref}.jpg",
         f"{image_ref}.png",
     ]
+    if image_ref.isdigit():
+        number = int(image_ref)
+        candidates.extend(
+            [
+                str(number),
+                f"{number:04d}",
+                f"{number:05d}",
+                f"{number:06d}",
+                f"{number:07d}",
+                f"{number:08d}",
+            ]
+        )
     for candidate in candidates:
         if candidate in image_paths:
             return str(image_paths[candidate])
