@@ -227,8 +227,9 @@ def main(args, config):
     print("Start training")
     start_time = time.time()
 
+    label_file = config.get("label_file", config.get("val_file"))
     if not args.no_eval:
-        val_stats = evaluate(model, val_loader, config["label_file"], tokenizer, device, config)
+        val_stats = evaluate(model, val_loader, label_file, tokenizer, device, config)
     for epoch in range(start_epoch, max_epoch):
         if epoch > 0:
             lr_scheduler.step(epoch + warmup_steps)
@@ -246,7 +247,7 @@ def main(args, config):
                 'epoch': epoch,
             }, os.path.join(args.output_dir, 'checkpoint_%02d.pth' % epoch))
         if not args.no_eval:
-            val_stats = evaluate(model, val_loader, config["label_file"], tokenizer, device, config)
+            val_stats = evaluate(model, val_loader, label_file, tokenizer, device, config)
             if epoch >= 5:
                 re_result = evaluation(model, test_loader, tokenizer, device, config)
                 result_file = save_result(re_result, args.result_dir, 're_result_epoch%d' % epoch)
