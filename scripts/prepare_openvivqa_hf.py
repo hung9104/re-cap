@@ -8,8 +8,24 @@ from huggingface_hub import hf_hub_download
 from PIL import Image
 
 
-QUESTION_CANDIDATES = ["question", "Question", "ques", "query", "prompt"]
-ANSWER_CANDIDATES = ["answer", "Answer", "answers", "label", "gt_answer"]
+QUESTION_CANDIDATES = [
+    "question",
+    "Question",
+    "ques",
+    "query",
+    "prompt",
+    "question_text",
+    "question_str",
+]
+ANSWER_CANDIDATES = [
+    "answer",
+    "Answer",
+    "answers",
+    "label",
+    "gt_answer",
+    "answer_text",
+    "answer_str",
+]
 IMAGE_CANDIDATES = ["image", "Image", "img", "image_path", "path", "filename"]
 ID_CANDIDATES = ["question_id", "id", "qid", "qa_id"]
 OPENVIVQA_FILES = {
@@ -63,6 +79,24 @@ def first_present(record, names):
     return None
 
 
+def extract_image_ref(record):
+    return first_present(
+        record,
+        [
+            "image",
+            "Image",
+            "img",
+            "image_path",
+            "path",
+            "filename",
+            "file_name",
+            "image_name",
+            "image_id",
+            "img_id",
+        ],
+    )
+
+
 def save_image(value, output_dir, index):
     output_dir.mkdir(parents=True, exist_ok=True)
     image_path = output_dir / f"{index:08d}.jpg"
@@ -103,6 +137,33 @@ def flatten_records(data, split):
     raise ValueError("Cannot find annotation records in OpenViVQA JSON")
 
 
+def iter_qa_records(node, inherited_image=None):
+    if isinstance(node, list):
+        for item in node:
+            yield from iter_qa_records(item, inherited_image)
+        return
+
+    if not isinstance(node, dict):
+        return
+
+    image_ref = extract_image_ref(node)
+    if image_ref is None:
+        image_ref = inherited_image
+
+    question = first_present(node, QUESTION_CANDIDATES)
+    if question is not None:
+        record = dict(node)
+        if image_ref is not None and extract_image_ref(record) is None:
+            record["image"] = image_ref
+        yield record
+
+    for key, value in node.items():
+        if key in ["images"]:
+            continue
+        if isinstance(value, (dict, list)):
+            yield from iter_qa_records(value, image_ref)
+
+
 def build_image_id_map(data):
     image_map = {}
     images = data.get("images", []) if isinstance(data, dict) else []
@@ -130,10 +191,7 @@ def index_images(image_root):
 
 
 def resolve_image_path(record, image_id_map, image_paths):
-    image_ref = first_present(
-        record,
-        ["image", "image_path", "img", "filename", "file_name", "image_id", "img_id"],
-    )
+    image_ref = extract_image_ref(record)
     if image_ref is None:
         raise KeyError(f"Cannot find image reference in record keys: {sorted(record.keys())}")
     image_ref = str(image_ref)
@@ -178,7 +236,12 @@ def convert_openvivqa_official(args):
 
     with open(ann_path, "r", encoding="utf-8") as fp:
         data = json.load(fp)
-    records = flatten_records(data, split_key)
+    if args.inspect:
+        print_schema(data)
+        return
+    records = list(iter_qa_records(data))
+    if not records:
+        records = flatten_records(data, split_key)
     image_id_map = build_image_id_map(data)
     image_paths = index_images(image_dir)
 
@@ -188,10 +251,10 @@ def convert_openvivqa_official(args):
             break
         if not isinstance(record, dict):
             continue
-        question = first_present(record, ["question", "Question", "ques", "query", "prompt"])
+        question = first_present(record, QUESTION_CANDIDATES)
         if question is None:
             continue
-        answer = first_present(record, ["answer", "Answer", "answers", "label", "gt_answer"])
+        answer = first_present(record, ANSWER_CANDIDATES)
         qid = first_present(record, ["question_id", "id", "qid", "qa_id"])
         rows.append(
             {
@@ -207,6 +270,24 @@ def convert_openvivqa_official(args):
     with open(output_file, "w", encoding="utf-8") as fp:
         json.dump(rows, fp, ensure_ascii=False, indent=2)
     print(f"Saved {len(rows)} OpenViVQA samples to {output_file}")
+
+
+def print_schema(node, depth=0, max_depth=4):
+    indent = "  " * depth
+    if depth > max_depth:
+        return
+    if isinstance(node, dict):
+        print(f"{indent}dict keys={list(node.keys())[:20]}")
+        for key, value in list(node.items())[:8]:
+            print(f"{indent}- {key}: {type(value).__name__}")
+            print_schema(value, depth + 1, max_depth)
+    elif isinstance(node, list):
+        print(f"{indent}list len={len(node)}")
+        if node:
+            print_schema(node[0], depth + 1, max_depth)
+    else:
+        text = str(node)
+        print(f"{indent}{type(node).__name__}: {text[:120]}")
 
 
 def convert_split(args):
@@ -264,5 +345,6 @@ if __name__ == "__main__":
     parser.add_argument("--id_column", default="")
     parser.add_argument("--max_samples", type=int, default=0)
     parser.add_argument("--openvivqa_official", action="store_true")
+    parser.add_argument("--inspect", action="store_true")
     args = parser.parse_args()
     convert_split(args)
